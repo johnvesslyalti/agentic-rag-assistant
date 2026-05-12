@@ -1,4 +1,6 @@
 faiss-cpu==1.13.2
+langchain-community==0.4.1
+python-dotenv==1.1.0
 fastapi==0.136.1
 langchain==1.2.18
 langchain-core==1.4.0
