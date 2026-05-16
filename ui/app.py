@@ -1,5 +1,6 @@
 """Streamlit chat UI for the Agentic RAG Assistant."""
 import json
+import os
 import uuid
 
 import requests
@@ -7,7 +8,7 @@ import streamlit as st
 
 API_URL = st.sidebar.text_input(
     "API Base URL",
-    value="http://localhost:8000",
+    value=os.getenv("API_URL", "http://localhost:8000"),
     help="URL where the FastAPI backend is running",
 )
 

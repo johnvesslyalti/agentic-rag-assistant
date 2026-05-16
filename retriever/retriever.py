@@ -10,18 +10,17 @@ _vectorstore = None
 def _load_vectorstore():
     global _vectorstore
     if _vectorstore is None:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         index_path = os.path.join(os.path.dirname(__file__), "faiss_index")
-        if os.path.exists(index_path):
-            _vectorstore = FAISS.load_local(
-                index_path,
-                embeddings,
-                allow_dangerous_deserialization=True
-            )
-        else:
+        if not os.path.exists(index_path):
             raise FileNotFoundError(
                 "FAISS index not found. Place your faiss_index/ folder inside retriever/"
             )
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        _vectorstore = FAISS.load_local(
+            index_path,
+            embeddings,
+            allow_dangerous_deserialization=True,
+        )
     return _vectorstore
 
 
