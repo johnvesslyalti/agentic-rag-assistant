@@ -40,7 +40,8 @@ Streamlit Chat UI
 | Web search | Tavily |
 | API | FastAPI + streaming |
 | UI | Streamlit |
-| Deployment | Railway + Vercel |
+| API deployment | Railway |
+| UI deployment | Streamlit Community Cloud |
 
 ## Setup
 
@@ -105,6 +106,42 @@ python tools/test_tools.py
 ```
 
 API-dependent tools skip gracefully when keys are absent.
+
+## Deploy
+
+### API → Railway
+
+1. Push this repo to GitHub.
+2. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**.
+3. Select this repository. Railway auto-detects `railway.toml` and builds from `Dockerfile`.
+4. Add environment variables in the Railway dashboard:
+   - `OPENAI_API_KEY`
+   - `TAVILY_API_KEY`
+5. Upload your FAISS index as a Railway volume mounted at `/app/retriever/faiss_index`, **or** run `scripts/ingest.py` as a one-off job inside the container before starting the API.
+6. Railway exposes the service on a public URL — note it for the UI step.
+
+### UI → Streamlit Community Cloud
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+2. Click **New app** → select this repository → set **Main file path** to `ui/app.py`.
+3. Under **Advanced settings → Secrets**, add:
+   ```toml
+   OPENAI_API_KEY = "your_openai_key"
+   TAVILY_API_KEY = "your_tavily_key"
+   API_URL = "https://your-railway-url.railway.app"
+   ```
+4. Deploy — Streamlit reads `API_URL` from environment at startup (see sidebar input in `ui/app.py`).
+
+### Full stack locally (Docker Compose)
+
+```bash
+cp .env.example .env   # fill in your keys
+docker compose up --build
+# API → http://localhost:8000
+# UI  → http://localhost:8501
+```
+
+---
 
 ## Built by
 
