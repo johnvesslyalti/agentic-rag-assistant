@@ -32,13 +32,23 @@ def client():
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Root and health
 # ---------------------------------------------------------------------------
+
+def test_root(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "Agentic RAG Assistant"
+    assert "endpoints" in data
+
 
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "retriever" in data
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +76,11 @@ def test_chat_missing_query_returns_422(client):
 
 def test_chat_empty_body_returns_422(client):
     resp = client.post("/chat", json={})
+    assert resp.status_code == 422
+
+
+def test_chat_query_too_long_returns_422(client):
+    resp = client.post("/chat", json={"query": "x" * 2001, "session_id": "t-long"})
     assert resp.status_code == 422
 
 

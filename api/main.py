@@ -1,9 +1,10 @@
 import json
+import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 
@@ -11,7 +12,11 @@ load_dotenv()
 
 from agent.agent import get_agent
 
-app = FastAPI(title="Agentic RAG Assistant", version="1.0.0")
+app = FastAPI(
+    title="Agentic RAG Assistant",
+    version="1.0.0",
+    description="ReAct agent with FAISS retrieval, Tavily web search, and streaming.",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,7 +27,7 @@ app.add_middleware(
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=1, max_length=2000)
     session_id: str = "default"
 
 
@@ -31,9 +36,30 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+@app.get("/")
+async def root():
+    return {
+        "name": "Agentic RAG Assistant",
+        "version": "1.0.0",
+        "endpoints": {
+            "health": "GET /health",
+            "chat": "POST /chat",
+            "stream": "POST /chat/stream",
+            "docs": "GET /docs",
+        },
+    }
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    index_path = os.path.join(
+        os.path.dirname(__file__), "..", "retriever", "faiss_index"
+    )
+    retriever_ready = os.path.exists(os.path.abspath(index_path))
+    return {
+        "status": "ok",
+        "retriever": "ready" if retriever_ready else "index missing — run scripts/ingest.py",
+    }
 
 
 @app.post("/chat/stream")
