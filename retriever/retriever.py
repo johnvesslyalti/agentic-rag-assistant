@@ -7,6 +7,7 @@ load_dotenv()
 
 _vectorstore = None
 
+
 def _load_vectorstore():
     global _vectorstore
     if _vectorstore is None:
@@ -25,18 +26,29 @@ def _load_vectorstore():
 
 
 def retrieve(query: str, k: int = 5) -> list[str]:
-    """
-    Retrieve top-k relevant chunks for a given query.
-    Returns a list of text strings.
-    """
+    """Retrieve top-k relevant chunks. Returns a list of text strings."""
     store = _load_vectorstore()
     docs = store.similarity_search(query, k=k)
     return [doc.page_content for doc in docs]
 
 
+def retrieve_with_sources(query: str, k: int = 5) -> list[dict]:
+    """Retrieve top-k chunks with essay title and URL metadata."""
+    store = _load_vectorstore()
+    docs = store.similarity_search(query, k=k)
+    return [
+        {
+            "content": doc.page_content,
+            "title": doc.metadata.get("title", "Paul Graham Essay"),
+            "source": doc.metadata.get("source", ""),
+        }
+        for doc in docs
+    ]
+
+
 if __name__ == "__main__":
-    results = retrieve("What does Paul Graham say about startups?")
+    results = retrieve_with_sources("What does Paul Graham say about startups?")
     for i, r in enumerate(results, 1):
-        print(f"--- Chunk {i} ---")
-        print(r)
+        print(f"--- Chunk {i} [{r['title']}] ---")
+        print(r["content"])
         print()

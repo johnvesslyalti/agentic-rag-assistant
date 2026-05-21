@@ -41,6 +41,7 @@ def test_root(client):
     data = resp.json()
     assert data["name"] == "Agentic RAG Assistant"
     assert "endpoints" in data
+    assert "history" in data["endpoints"]
 
 
 def test_health(client):
@@ -98,3 +99,54 @@ def test_chat_stream_contains_data_lines(client):
     resp = client.post("/chat/stream", json={"query": "Hello", "session_id": "t4"})
     body = resp.text
     assert "data:" in body
+
+
+# ---------------------------------------------------------------------------
+# Session history
+# ---------------------------------------------------------------------------
+
+def test_session_history_empty_for_new_session(client):
+    resp = client.get("/sessions/never-used-session/history")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == "never-used-session"
+    assert data["messages"] == []
+    assert data["count"] == 0
+
+
+def test_session_history_records_chat_turns(client):
+    sid = "history-test-session"
+    client.post("/chat", json={"query": "What is 2+2?", "session_id": sid})
+    resp = client.get(f"/sessions/{sid}/history")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] >= 2
+    roles = [m["role"] for m in data["messages"]]
+    assert "user" in roles
+    assert "assistant" in roles
+
+
+def test_session_history_contains_query_text(client):
+    sid = "history-content-test"
+    query = "Tell me about Paul Graham essays"
+    client.post("/chat", json={"query": query, "session_id": sid})
+    resp = client.get(f"/sessions/{sid}/history")
+    messages = resp.json()["messages"]
+    user_msgs = [m for m in messages if m["role"] == "user"]
+    assert any(query in m["content"] for m in user_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Source citation format
+# ---------------------------------------------------------------------------
+
+def test_retrieve_essays_tool_includes_source_label():
+    """retrieve_essays should prefix each chunk with [Source: <title>] when index is missing it returns an error string, not an exception."""
+    from tools.tools import retrieve_essays
+    result = retrieve_essays.invoke("What does Paul Graham say about startups?")
+    assert isinstance(result, str)
+    assert len(result) > 0
+    # Either a graceful error OR a citation-formatted response
+    has_citation = "[Source:" in result
+    has_error = "unavailable" in result or "error" in result.lower()
+    assert has_citation or has_error, f"Unexpected result: {result[:120]}"

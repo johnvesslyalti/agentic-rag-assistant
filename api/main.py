@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +11,13 @@ from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("rag_api")
 
 from agent.agent import get_agent
 
@@ -25,6 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# In-memory session history store: {session_id: [{"role": ..., "content": ...}]}
+_session_histories: dict[str, list[dict]] = {}
+
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
@@ -36,6 +48,12 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+class SessionHistoryResponse(BaseModel):
+    session_id: str
+    messages: list[dict]
+    count: int
+
+
 @app.get("/")
 async def root():
     return {
@@ -45,6 +63,7 @@ async def root():
             "health": "GET /health",
             "chat": "POST /chat",
             "stream": "POST /chat/stream",
+            "history": "GET /sessions/{session_id}/history",
             "docs": "GET /docs",
         },
     }
@@ -62,6 +81,17 @@ async def health():
     }
 
 
+@app.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
+async def get_session_history(session_id: str):
+    """Return the stored conversation history for a session."""
+    messages = _session_histories.get(session_id, [])
+    return SessionHistoryResponse(
+        session_id=session_id,
+        messages=messages,
+        count=len(messages),
+    )
+
+
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Stream tokens from the agent as server-sent events."""
@@ -69,16 +99,35 @@ async def chat_stream(request: ChatRequest):
     config = {"configurable": {"thread_id": request.session_id}}
     input_state = {"messages": [HumanMessage(content=request.query)]}
 
+    _session_histories.setdefault(request.session_id, []).append(
+        {"role": "user", "content": request.query}
+    )
+    logger.info("stream_start session=%s query_len=%d", request.session_id, len(request.query))
+    t0 = time.monotonic()
+
     async def generate():
+        full_response = ""
         try:
             async for event in agent.astream_events(input_state, config=config, version="v2"):
                 if event["event"] == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     if chunk.content:
+                        full_response += chunk.content
                         yield f"data: {json.dumps({'token': chunk.content})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
+            logger.error("stream_error session=%s error=%s", request.session_id, str(e))
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            elapsed = time.monotonic() - t0
+            if full_response:
+                _session_histories.setdefault(request.session_id, []).append(
+                    {"role": "assistant", "content": full_response}
+                )
+            logger.info(
+                "stream_done session=%s elapsed=%.2fs response_len=%d",
+                request.session_id, elapsed, len(full_response),
+            )
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -89,9 +138,26 @@ async def chat(request: ChatRequest):
     agent = get_agent()
     config = {"configurable": {"thread_id": request.session_id}}
     input_state = {"messages": [HumanMessage(content=request.query)]}
+
+    _session_histories.setdefault(request.session_id, []).append(
+        {"role": "user", "content": request.query}
+    )
+    logger.info("chat_start session=%s query_len=%d", request.session_id, len(request.query))
+    t0 = time.monotonic()
+
     try:
         result = await agent.ainvoke(input_state, config=config)
         last_message = result["messages"][-1]
-        return ChatResponse(response=last_message.content, session_id=request.session_id)
+        response_text = last_message.content
+        _session_histories.setdefault(request.session_id, []).append(
+            {"role": "assistant", "content": response_text}
+        )
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "chat_done session=%s elapsed=%.2fs response_len=%d",
+            request.session_id, elapsed, len(response_text),
+        )
+        return ChatResponse(response=response_text, session_id=request.session_id)
     except Exception as e:
+        logger.error("chat_error session=%s error=%s", request.session_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))

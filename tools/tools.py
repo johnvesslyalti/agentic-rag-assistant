@@ -10,11 +10,14 @@ load_dotenv()
 def retrieve_essays(query: str) -> str:
     """Search Paul Graham's essays for relevant information about startups, writing, and technology."""
     try:
-        from retriever.retriever import retrieve
-        chunks = retrieve(query, k=5)
-        if not chunks:
+        from retriever.retriever import retrieve_with_sources
+        results = retrieve_with_sources(query, k=5)
+        if not results:
             return "No relevant content found in essays."
-        return "\n\n---\n\n".join(chunks)
+        return "\n\n---\n\n".join(
+            f"[Source: {r['title']}]\n{r['content']}"
+            for r in results
+        )
     except FileNotFoundError:
         return "Essay retrieval unavailable: FAISS index not found. Place faiss_index/ inside retriever/."
     except Exception as e:

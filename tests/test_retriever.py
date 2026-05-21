@@ -85,3 +85,73 @@ def test_vectorstore_is_cached():
     assert result is mock_store
 
     _reset_vectorstore()
+
+
+# ---------------------------------------------------------------------------
+# retrieve_with_sources
+# ---------------------------------------------------------------------------
+
+def _make_mock_doc_with_meta(content: str, title: str, source: str) -> MagicMock:
+    doc = MagicMock()
+    doc.page_content = content
+    doc.metadata = {"title": title, "source": source}
+    return doc
+
+
+def test_retrieve_with_sources_returns_dicts():
+    import retriever.retriever as mod
+
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = [
+        _make_mock_doc_with_meta(
+            "Do things that don't scale.",
+            "Do Things that Don't Scale",
+            "http://paulgraham.com/ds.html",
+        ),
+    ]
+    mod._vectorstore = mock_store
+
+    results = mod.retrieve_with_sources("startups", k=1)
+
+    assert isinstance(results, list)
+    assert len(results) == 1
+    r = results[0]
+    assert "content" in r
+    assert "title" in r
+    assert "source" in r
+    assert r["title"] == "Do Things that Don't Scale"
+    assert r["source"] == "http://paulgraham.com/ds.html"
+    assert "don't scale" in r["content"]
+
+    _reset_vectorstore()
+
+
+def test_retrieve_with_sources_missing_metadata_uses_defaults():
+    import retriever.retriever as mod
+
+    doc = MagicMock()
+    doc.page_content = "Some content"
+    doc.metadata = {}  # no title or source
+
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = [doc]
+    mod._vectorstore = mock_store
+
+    results = mod.retrieve_with_sources("query", k=1)
+    assert results[0]["title"] == "Paul Graham Essay"
+    assert results[0]["source"] == ""
+
+    _reset_vectorstore()
+
+
+def test_retrieve_with_sources_empty_result():
+    import retriever.retriever as mod
+
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = []
+    mod._vectorstore = mock_store
+
+    results = mod.retrieve_with_sources("obscure query", k=5)
+    assert results == []
+
+    _reset_vectorstore()
