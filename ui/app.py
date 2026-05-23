@@ -26,6 +26,13 @@ with st.sidebar:
     st.markdown("**Session ID**")
     st.code(st.session_state.session_id, language=None)
     if st.button("New session"):
+        try:
+            requests.delete(
+                f"{API_URL}/sessions/{st.session_state.session_id}/history",
+                timeout=5,
+            )
+        except Exception:
+            pass
         st.session_state.session_id = str(uuid.uuid4())
         st.session_state.messages = []
         st.rerun()

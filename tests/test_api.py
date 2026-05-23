@@ -137,6 +137,78 @@ def test_session_history_contains_query_text(client):
 
 
 # ---------------------------------------------------------------------------
+# GET /sessions
+# ---------------------------------------------------------------------------
+
+def test_list_sessions_returns_list(client):
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "sessions" in data
+    assert "count" in data
+    assert isinstance(data["sessions"], list)
+
+
+def test_list_sessions_includes_used_session(client):
+    sid = "list-sessions-test"
+    client.post("/chat", json={"query": "Hello", "session_id": sid})
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert sid in data["sessions"]
+    assert data["count"] == len(data["sessions"])
+
+
+# ---------------------------------------------------------------------------
+# DELETE /sessions/{session_id}/history
+# ---------------------------------------------------------------------------
+
+def test_delete_session_history_returns_204(client):
+    sid = "delete-test-session"
+    client.post("/chat", json={"query": "Hello", "session_id": sid})
+    resp = client.delete(f"/sessions/{sid}/history")
+    assert resp.status_code == 204
+
+
+def test_delete_session_history_clears_messages(client):
+    sid = "delete-clear-test"
+    client.post("/chat", json={"query": "Remember this", "session_id": sid})
+    history_before = client.get(f"/sessions/{sid}/history").json()
+    assert history_before["count"] > 0
+
+    client.delete(f"/sessions/{sid}/history")
+
+    history_after = client.get(f"/sessions/{sid}/history").json()
+    assert history_after["count"] == 0
+    assert history_after["messages"] == []
+
+
+def test_delete_nonexistent_session_returns_204(client):
+    """Deleting a session that never existed is idempotent."""
+    resp = client.delete("/sessions/never-existed-xyz/history")
+    assert resp.status_code == 204
+
+
+def test_list_sessions_excludes_deleted_session(client):
+    sid = "delete-exclude-test"
+    client.post("/chat", json={"query": "Hello", "session_id": sid})
+    client.delete(f"/sessions/{sid}/history")
+    resp = client.get("/sessions")
+    assert sid not in resp.json()["sessions"]
+
+
+# ---------------------------------------------------------------------------
+# Root endpoint advertises new endpoints
+# ---------------------------------------------------------------------------
+
+def test_root_advertises_sessions_endpoint(client):
+    resp = client.get("/")
+    data = resp.json()
+    assert "sessions" in data["endpoints"]
+    assert "delete_history" in data["endpoints"]
+
+
+# ---------------------------------------------------------------------------
 # Source citation format
 # ---------------------------------------------------------------------------
 

@@ -54,6 +54,24 @@ class SessionHistoryResponse(BaseModel):
     count: int
 
 
+class SessionsListResponse(BaseModel):
+    sessions: list[str]
+    count: int
+
+
+@app.get("/sessions", response_model=SessionsListResponse)
+async def list_sessions():
+    """Return all session IDs that have stored history."""
+    sessions = list(_session_histories.keys())
+    return SessionsListResponse(sessions=sessions, count=len(sessions))
+
+
+@app.delete("/sessions/{session_id}/history", status_code=204)
+async def delete_session_history(session_id: str):
+    """Clear the stored conversation history for a session."""
+    _session_histories.pop(session_id, None)
+
+
 @app.get("/")
 async def root():
     return {
@@ -63,7 +81,9 @@ async def root():
             "health": "GET /health",
             "chat": "POST /chat",
             "stream": "POST /chat/stream",
+            "sessions": "GET /sessions",
             "history": "GET /sessions/{session_id}/history",
+            "delete_history": "DELETE /sessions/{session_id}/history",
             "docs": "GET /docs",
         },
     }
