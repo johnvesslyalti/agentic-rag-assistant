@@ -198,7 +198,7 @@ def test_list_sessions_excludes_deleted_session(client):
 
 
 # ---------------------------------------------------------------------------
-# Root endpoint advertises new endpoints
+# Root endpoint advertises all endpoints
 # ---------------------------------------------------------------------------
 
 def test_root_advertises_sessions_endpoint(client):
