@@ -6,6 +6,12 @@ import uuid
 import requests
 import streamlit as st
 
+_TOOL_STATUS = {
+    "retrieve_essays": "🔍 Searching Paul Graham's essays…",
+    "web_search": "🌐 Searching the web…",
+    "answer_directly": "💭 Thinking…",
+}
+
 API_URL = st.sidebar.text_input(
     "API Base URL",
     value=os.getenv("API_URL", "http://localhost:8000"),
@@ -49,6 +55,7 @@ if prompt := st.chat_input("Ask about startups, writing, or anything else…"):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_response = ""
+        active_tool = ""
 
         try:
             with requests.post(
@@ -74,9 +81,23 @@ if prompt := st.chat_input("Ask about startups, writing, or anything else…"):
                     if "error" in data:
                         full_response += f"\n\n⚠️ {data['error']}"
                         break
-                    token = data.get("token", "")
-                    full_response += token
-                    placeholder.markdown(full_response + "▌")
+                    if "tool_start" in data:
+                        active_tool = _TOOL_STATUS.get(
+                            data["tool_start"], f"🔧 Using {data['tool_start']}…"
+                        )
+                        display = f"*{active_tool}*"
+                        if full_response:
+                            display += f"\n\n{full_response}▌"
+                        placeholder.markdown(display)
+                    elif "tool_end" in data:
+                        active_tool = ""
+                        placeholder.markdown(full_response + "▌" if full_response else "")
+                    elif "token" in data:
+                        full_response += data["token"]
+                        if active_tool:
+                            placeholder.markdown(f"*{active_tool}*\n\n{full_response}▌")
+                        else:
+                            placeholder.markdown(full_response + "▌")
 
         except requests.exceptions.ConnectionError:
             full_response = "⚠️ Cannot reach the API. Make sure the FastAPI server is running."

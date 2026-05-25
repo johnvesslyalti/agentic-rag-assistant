@@ -129,11 +129,23 @@ async def chat_stream(request: ChatRequest):
         full_response = ""
         try:
             async for event in agent.astream_events(input_state, config=config, version="v2"):
-                if event["event"] == "on_chat_model_stream":
+                kind = event["event"]
+                if kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     if chunk.content:
                         full_response += chunk.content
                         yield f"data: {json.dumps({'token': chunk.content})}\n\n"
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    if tool_name:
+                        logger.info(
+                            "tool_start session=%s tool=%s", request.session_id, tool_name
+                        )
+                        yield f"data: {json.dumps({'tool_start': tool_name})}\n\n"
+                elif kind == "on_tool_end":
+                    tool_name = event.get("name", "")
+                    if tool_name:
+                        yield f"data: {json.dumps({'tool_end': tool_name})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error("stream_error session=%s error=%s", request.session_id, str(e))

@@ -2,6 +2,7 @@
 FastAPI endpoint tests — no API keys required, all LLM calls are mocked.
 Run: pytest tests/test_api.py -v
 """
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,9 +24,33 @@ def _make_mock_agent():
     return agent
 
 
+def _make_mock_agent_with_tools():
+    """Agent that emits tool_start/tool_end SSE events before responding."""
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(
+        return_value={"messages": [AIMessage(content="Mock answer with tools")]}
+    )
+
+    async def _astream_with_tool_events(state, config, version):
+        yield {"event": "on_tool_start", "name": "retrieve_essays", "data": {}}
+        yield {"event": "on_tool_end", "name": "retrieve_essays", "data": {}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="Answer")}}
+
+    agent.astream_events = _astream_with_tool_events
+    return agent
+
+
 @pytest.fixture()
 def client():
     with patch("api.main.get_agent", return_value=_make_mock_agent()):
+        from api.main import app
+        with TestClient(app) as c:
+            yield c
+
+
+@pytest.fixture()
+def client_with_tools():
+    with patch("api.main.get_agent", return_value=_make_mock_agent_with_tools()):
         from api.main import app
         with TestClient(app) as c:
             yield c
@@ -222,3 +247,67 @@ def test_retrieve_essays_tool_includes_source_label():
     has_citation = "[Source:" in result
     has_error = "unavailable" in result or "error" in result.lower()
     assert has_citation or has_error, f"Unexpected result: {result[:120]}"
+
+
+# ---------------------------------------------------------------------------
+# Tool-event SSE transparency
+# ---------------------------------------------------------------------------
+
+def _parse_sse_payloads(body: str) -> list[dict]:
+    payloads = []
+    for line in body.split("\n"):
+        if not line.startswith("data: "):
+            continue
+        raw = line[6:]
+        if raw == "[DONE]":
+            continue
+        try:
+            payloads.append(json.loads(raw))
+        except json.JSONDecodeError:
+            pass
+    return payloads
+
+
+def test_chat_stream_emits_tool_start_event(client_with_tools):
+    """Streaming endpoint forwards on_tool_start as a tool_start SSE event."""
+    resp = client_with_tools.post(
+        "/chat/stream",
+        json={"query": "What does PG say about startups?", "session_id": "tool-ev-1"},
+    )
+    assert resp.status_code == 200
+    payloads = _parse_sse_payloads(resp.text)
+    assert any("tool_start" in p for p in payloads), f"No tool_start in {payloads}"
+
+
+def test_chat_stream_emits_tool_end_event(client_with_tools):
+    """Streaming endpoint forwards on_tool_end as a tool_end SSE event."""
+    resp = client_with_tools.post(
+        "/chat/stream",
+        json={"query": "What does PG say about startups?", "session_id": "tool-ev-2"},
+    )
+    assert resp.status_code == 200
+    payloads = _parse_sse_payloads(resp.text)
+    assert any("tool_end" in p for p in payloads), f"No tool_end in {payloads}"
+
+
+def test_chat_stream_tool_event_contains_tool_name(client_with_tools):
+    """tool_start event includes the tool name string."""
+    resp = client_with_tools.post(
+        "/chat/stream",
+        json={"query": "Startups question", "session_id": "tool-ev-3"},
+    )
+    payloads = _parse_sse_payloads(resp.text)
+    tool_starts = [p for p in payloads if "tool_start" in p]
+    assert tool_starts, "No tool_start payloads found"
+    assert tool_starts[0]["tool_start"] == "retrieve_essays"
+
+
+def test_chat_stream_token_event_still_present_alongside_tool_events(client_with_tools):
+    """Token events are still emitted when tool events are also present."""
+    resp = client_with_tools.post(
+        "/chat/stream",
+        json={"query": "Any question", "session_id": "tool-ev-4"},
+    )
+    payloads = _parse_sse_payloads(resp.text)
+    assert any("token" in p for p in payloads), "No token events emitted"
+    assert any("tool_start" in p for p in payloads), "No tool_start events emitted"
