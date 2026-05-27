@@ -14,20 +14,20 @@ It also maintains **conversation memory** across turns and streams responses via
 
 ## Architecture
 
-```
-User query
-    │
-    ▼
-LangGraph ReAct Agent
-    ├── retrieve_essays  (FAISS + OpenAI embeddings)
-    ├── web_search       (Tavily)
-    └── answer_directly  (GPT-4o)
-    │
-    ▼
-FastAPI /chat endpoint  (streaming SSE)
-    │
-    ▼
-Streamlit Chat UI
+```mermaid
+flowchart TD
+    User["💬 User"] --> UI["Streamlit Chat UI\nui/app.py"]
+    UI -->|"POST /chat/stream — SSE"| API["FastAPI Backend\napi/main.py"]
+    API --> Agent["LangGraph ReAct Agent\nagent/agent.py"]
+    Agent --> Router{"Tool Router"}
+    Router -->|"PG essay query"| Essays["retrieve_essays\nFAISS + OpenAI Embeddings"]
+    Router -->|"current events"| Web["web_search\nTavily API"]
+    Router -->|"simple facts"| Direct["answer_directly\nGPT-4o"]
+    Essays --> FAISS[("FAISS Index\nretriever/faiss_index/")]
+    Agent <--> Memory["MemorySaver\nper-session history"]
+    Agent -->|"final response"| API
+    API -->|"SSE tokens"| UI
+    UI --> User
 ```
 
 ## Stack

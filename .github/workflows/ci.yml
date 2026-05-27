@@ -27,9 +27,8 @@ jobs:
       - name: Tool isolation test
         run: python tools/test_tools.py
 
-      - name: Verify server starts
+      - name: Smoke test (server startup + endpoint checks)
         run: |
           uvicorn api.main:app --port 8000 &
           sleep 4
-          curl -sf http://localhost:8000/health
-          curl -sf http://localhost:8000/ > /dev/null
+          python scripts/smoke_test.py http://localhost:8000
