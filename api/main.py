@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -177,8 +178,12 @@ async def chat(request: ChatRequest):
     logger.info("chat_start session=%s query_len=%d", request.session_id, len(request.query))
     t0 = time.monotonic()
 
+    _timeout = float(os.getenv("AGENT_TIMEOUT", "120"))
     try:
-        result = await agent.ainvoke(input_state, config=config)
+        result = await asyncio.wait_for(
+            agent.ainvoke(input_state, config=config),
+            timeout=_timeout,
+        )
         last_message = result["messages"][-1]
         response_text = last_message.content
         _session_histories.setdefault(request.session_id, []).append(
@@ -190,6 +195,9 @@ async def chat(request: ChatRequest):
             request.session_id, elapsed, len(response_text),
         )
         return ChatResponse(response=response_text, session_id=request.session_id)
+    except asyncio.TimeoutError:
+        logger.error("chat_timeout session=%s timeout=%.0fs", request.session_id, _timeout)
+        raise HTTPException(status_code=504, detail=f"Agent did not respond within {_timeout:.0f}s")
     except Exception as e:
         logger.error("chat_error session=%s error=%s", request.session_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))

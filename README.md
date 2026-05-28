@@ -1,5 +1,7 @@
 # Agentic RAG Assistant 🤖
 
+![CI](https://github.com/johnvesslyalti/agentic-rag-assistant/actions/workflows/ci.yml/badge.svg)
+
 Conversational AI agent that decides when to retrieve, search, or answer directly — built on LangGraph, FAISS, and OpenAI.
 
 ## What it does

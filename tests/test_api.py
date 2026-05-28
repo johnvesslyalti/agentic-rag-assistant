@@ -2,6 +2,7 @@
 FastAPI endpoint tests — no API keys required, all LLM calls are mocked.
 Run: pytest tests/test_api.py -v
 """
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -311,3 +312,37 @@ def test_chat_stream_token_event_still_present_alongside_tool_events(client_with
     payloads = _parse_sse_payloads(resp.text)
     assert any("token" in p for p in payloads), "No token events emitted"
     assert any("tool_start" in p for p in payloads), "No tool_start events emitted"
+
+
+# ---------------------------------------------------------------------------
+# Timeout handling
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def client_timeout():
+    """Client whose agent.ainvoke always times out."""
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    async def _no_stream(*args, **kwargs):
+        return
+        yield  # make it an async generator
+
+    agent.astream_events = _no_stream
+    with patch("api.main.get_agent", return_value=agent):
+        from api.main import app
+        with TestClient(app) as c:
+            yield c
+
+
+def test_chat_timeout_returns_504(client_timeout):
+    """POST /chat returns 504 when the agent exceeds the configured timeout."""
+    resp = client_timeout.post("/chat", json={"query": "Hello", "session_id": "to-1"})
+    assert resp.status_code == 504
+
+
+def test_chat_timeout_detail_mentions_timeout(client_timeout):
+    """504 response body should describe the timeout condition."""
+    resp = client_timeout.post("/chat", json={"query": "Hello", "session_id": "to-2"})
+    detail = resp.json()["detail"].lower()
+    assert "respond" in detail or "timeout" in detail or "timed out" in detail
