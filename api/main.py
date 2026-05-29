@@ -3,10 +3,11 @@ import json
 import logging
 import os
 import time
+from collections import defaultdict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
@@ -34,6 +35,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Rate limiting — configurable via RATE_LIMIT_PER_MIN env var (0 = disabled)
+# ---------------------------------------------------------------------------
+_RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
+_ip_request_times: dict[str, list[float]] = defaultdict(list)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if _RATE_LIMIT <= 0:
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_start = now - 60.0
+
+    bucket = _ip_request_times[client_ip]
+    # Evict timestamps outside the 1-minute window
+    _ip_request_times[client_ip] = [t for t in bucket if t > window_start]
+
+    if len(_ip_request_times[client_ip]) >= _RATE_LIMIT:
+        logger.warning("rate_limit ip=%s requests=%d", client_ip, len(_ip_request_times[client_ip]))
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Try again in a minute."},
+        )
+
+    _ip_request_times[client_ip].append(now)
+    return await call_next(request)
+
 
 # In-memory session history store: {session_id: [{"role": ..., "content": ...}]}
 _session_histories: dict[str, list[dict]] = {}

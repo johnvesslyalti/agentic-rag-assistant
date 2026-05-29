@@ -4,6 +4,7 @@ Run: pytest tests/test_api.py -v
 """
 import asyncio
 import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -346,3 +347,73 @@ def test_chat_timeout_detail_mentions_timeout(client_timeout):
     resp = client_timeout.post("/chat", json={"query": "Hello", "session_id": "to-2"})
     detail = resp.json()["detail"].lower()
     assert "respond" in detail or "timeout" in detail or "timed out" in detail
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def client_rate_limited():
+    """Client with a very low rate limit (2 requests/min) for testing."""
+    import api.main as main_mod
+
+    original_limit = main_mod._RATE_LIMIT
+    original_bucket = dict(main_mod._ip_request_times)
+    main_mod._RATE_LIMIT = 2
+    main_mod._ip_request_times.clear()
+
+    with patch("api.main.get_agent", return_value=_make_mock_agent()):
+        from api.main import app
+        with TestClient(app) as c:
+            yield c
+
+    main_mod._RATE_LIMIT = original_limit
+    main_mod._ip_request_times.clear()
+    main_mod._ip_request_times.update(original_bucket)
+
+
+def test_rate_limit_allows_requests_under_limit(client_rate_limited):
+    """Requests under the rate limit succeed."""
+    resp = client_rate_limited.get("/health")
+    assert resp.status_code == 200
+
+
+def test_rate_limit_returns_429_when_exceeded(client_rate_limited):
+    """Requests over the per-minute limit return 429."""
+    import api.main as main_mod
+
+    # Fill up the bucket to the limit
+    main_mod._ip_request_times["testclient"] = [
+        time.monotonic() for _ in range(main_mod._RATE_LIMIT)
+    ]
+    resp = client_rate_limited.get("/health")
+    assert resp.status_code == 429
+
+
+def test_rate_limit_429_response_has_detail(client_rate_limited):
+    """429 response body includes a human-readable detail message."""
+    import api.main as main_mod
+    import time
+
+    main_mod._ip_request_times["testclient"] = [
+        time.monotonic() for _ in range(main_mod._RATE_LIMIT)
+    ]
+    resp = client_rate_limited.get("/health")
+    data = resp.json()
+    assert "detail" in data
+    assert "rate limit" in data["detail"].lower()
+
+
+def test_rate_limit_disabled_when_zero(client):
+    """RATE_LIMIT_PER_MIN=0 disables rate limiting entirely."""
+    import api.main as main_mod
+
+    original = main_mod._RATE_LIMIT
+    main_mod._RATE_LIMIT = 0
+    try:
+        for _ in range(10):
+            resp = client.get("/health")
+            assert resp.status_code == 200
+    finally:
+        main_mod._RATE_LIMIT = original

@@ -93,6 +93,17 @@ docker compose up --build
 streamlit run ui/app.py
 ```
 
+## Validate your environment
+
+Before starting the server, run the environment checker to confirm API keys and the FAISS index are present:
+
+```bash
+python scripts/check_env.py
+# or: make check-env
+```
+
+It exits 0 if everything is ready, 1 if required vars are missing (with setup hints).
+
 ## Test
 
 ```bash
@@ -108,6 +119,17 @@ python tools/test_tools.py
 ```
 
 API-dependent tools skip gracefully when keys are absent.
+
+## Rate limiting
+
+The API enforces a per-IP sliding-window rate limit (default: 60 requests/minute). Tune or disable it via the environment variable:
+
+```bash
+RATE_LIMIT_PER_MIN=120  # raise the limit
+RATE_LIMIT_PER_MIN=0    # disable entirely (useful for local dev)
+```
+
+Requests over the limit receive `HTTP 429` with a JSON `{"detail": "..."}` body.
 
 ## Deploy
 

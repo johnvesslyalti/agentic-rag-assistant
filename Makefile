@@ -1,4 +1,4 @@
-.PHONY: install test run ui ingest smoke docker-up docker-down
+.PHONY: install test run ui ingest smoke check-env docker-up docker-down
 
 install:
 	pip install -r requirements.txt
@@ -17,6 +17,9 @@ ingest:
 
 smoke:
 	python scripts/smoke_test.py
+
+check-env:
+	python scripts/check_env.py
 
 docker-up:
 	docker compose up --build
