@@ -47,7 +47,13 @@ def retrieve_with_sources(query: str, k: int = 5) -> list[dict]:
 
 
 if __name__ == "__main__":
-    results = retrieve_with_sources("What does Paul Graham say about startups?")
+    try:
+        results = retrieve_with_sources("What does Paul Graham say about startups?")
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        print("\nRun 'python scripts/ingest.py' to build the FAISS index first.")
+        raise SystemExit(1)
+
     for i, r in enumerate(results, 1):
         print(f"--- Chunk {i} [{r['title']}] ---")
         print(r["content"])

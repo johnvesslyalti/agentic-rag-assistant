@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +43,18 @@ app.add_middleware(
 _RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 _ip_request_times: dict[str, list[float]] = defaultdict(list)
 
+# ---------------------------------------------------------------------------
+# Request metrics — lightweight in-process counters
+# ---------------------------------------------------------------------------
+_START_TIME = time.monotonic()
+_metrics: dict[str, int] = defaultdict(int)
+_metrics_lock = Lock()
+
+
+def _inc(key: str) -> None:
+    with _metrics_lock:
+        _metrics[key] += 1
+
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -58,12 +71,14 @@ async def rate_limit_middleware(request: Request, call_next):
 
     if len(_ip_request_times[client_ip]) >= _RATE_LIMIT:
         logger.warning("rate_limit ip=%s requests=%d", client_ip, len(_ip_request_times[client_ip]))
+        _inc("rate_limited_total")
         return JSONResponse(
             status_code=429,
             content={"detail": "Rate limit exceeded. Try again in a minute."},
         )
 
     _ip_request_times[client_ip].append(now)
+    _inc("requests_total")
     return await call_next(request)
 
 
@@ -92,6 +107,32 @@ class SessionsListResponse(BaseModel):
     count: int
 
 
+class MetricsResponse(BaseModel):
+    uptime_seconds: float
+    requests_total: int
+    rate_limited_total: int
+    chat_requests: int
+    stream_requests: int
+    active_sessions: int
+    rate_limit_per_min: int
+
+
+@app.get("/metrics", response_model=MetricsResponse)
+async def metrics():
+    """Return lightweight in-process counters for monitoring."""
+    with _metrics_lock:
+        snapshot = dict(_metrics)
+    return MetricsResponse(
+        uptime_seconds=round(time.monotonic() - _START_TIME, 2),
+        requests_total=snapshot.get("requests_total", 0),
+        rate_limited_total=snapshot.get("rate_limited_total", 0),
+        chat_requests=snapshot.get("chat_requests", 0),
+        stream_requests=snapshot.get("stream_requests", 0),
+        active_sessions=len(_session_histories),
+        rate_limit_per_min=_RATE_LIMIT,
+    )
+
+
 @app.get("/sessions", response_model=SessionsListResponse)
 async def list_sessions():
     """Return all session IDs that have stored history."""
@@ -112,6 +153,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "health": "GET /health",
+            "metrics": "GET /metrics",
             "chat": "POST /chat",
             "stream": "POST /chat/stream",
             "sessions": "GET /sessions",
@@ -148,6 +190,7 @@ async def get_session_history(session_id: str):
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Stream tokens from the agent as server-sent events."""
+    _inc("stream_requests")
     agent = get_agent()
     config = {"configurable": {"thread_id": request.session_id}}
     input_state = {"messages": [HumanMessage(content=request.query)]}
@@ -200,6 +243,7 @@ async def chat_stream(request: ChatRequest):
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Non-streaming chat endpoint; returns the full response once complete."""
+    _inc("chat_requests")
     agent = get_agent()
     config = {"configurable": {"thread_id": request.session_id}}
     input_state = {"messages": [HumanMessage(content=request.query)]}

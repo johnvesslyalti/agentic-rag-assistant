@@ -235,6 +235,64 @@ def test_root_advertises_sessions_endpoint(client):
     assert "delete_history" in data["endpoints"]
 
 
+def test_root_advertises_metrics_endpoint(client):
+    resp = client.get("/")
+    data = resp.json()
+    assert "metrics" in data["endpoints"]
+
+
+# ---------------------------------------------------------------------------
+# GET /metrics
+# ---------------------------------------------------------------------------
+
+def test_metrics_returns_200(client):
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+
+
+def test_metrics_response_shape(client):
+    resp = client.get("/metrics")
+    data = resp.json()
+    for field in (
+        "uptime_seconds",
+        "requests_total",
+        "rate_limited_total",
+        "chat_requests",
+        "stream_requests",
+        "active_sessions",
+        "rate_limit_per_min",
+    ):
+        assert field in data, f"Missing field: {field}"
+
+
+def test_metrics_uptime_is_positive(client):
+    resp = client.get("/metrics")
+    assert resp.json()["uptime_seconds"] >= 0
+
+
+def test_metrics_chat_requests_increments(client):
+    before = client.get("/metrics").json()["chat_requests"]
+    client.post("/chat", json={"query": "Hello", "session_id": "metrics-test"})
+    after = client.get("/metrics").json()["chat_requests"]
+    assert after == before + 1
+
+
+def test_metrics_stream_requests_increments(client):
+    before = client.get("/metrics").json()["stream_requests"]
+    client.post("/chat/stream", json={"query": "Hello", "session_id": "metrics-stream-test"})
+    after = client.get("/metrics").json()["stream_requests"]
+    assert after == before + 1
+
+
+def test_metrics_active_sessions_reflects_history(client):
+    import api.main as main_mod
+    main_mod._session_histories.clear()
+    client.post("/chat", json={"query": "hi", "session_id": "m-sess-1"})
+    client.post("/chat", json={"query": "hi", "session_id": "m-sess-2"})
+    resp = client.get("/metrics")
+    assert resp.json()["active_sessions"] >= 2
+
+
 # ---------------------------------------------------------------------------
 # Source citation format
 # ---------------------------------------------------------------------------
